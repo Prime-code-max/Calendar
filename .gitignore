@@ -1,0 +1,28 @@
+# общие
+.env
+*.log
+*.pyc
+__pycache__/
+.vscode/
+.idea/
+.DS_Store
+
+# python venv
+.venv/
+venv/
+*/__pycache__/
+
+# docker/данные
+db_data/
+
+# фронтенд (если появится в этом репо)
+**/node_modules/
+**/build/
+**/dist/
+
+# whisper-service: не коммитим артефакты/кэш/модели/загрузки
+whisper-service/uploads/
+whisper-service/cache/
+whisper-service/.cache/
+whisper-service/models/
+whisper-service/.venv/
