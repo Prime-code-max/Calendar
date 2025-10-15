@@ -3,43 +3,56 @@ version: "3.9"
 services:
   postgres:
     image: postgres:15
-    container_name: postgres
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_DB: auth_db
-    ports:
-      - "5432:5432"
+    volumes:
+      - ./VKR/db_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d auth_db"]
       interval: 5s
       timeout: 5s
-      retries: 5
-    volumes:
-      - ./db_data:/var/lib/postgresql/data
+      retries: 10
 
   auth-service:
-    build: ./auth-service
-    container_name: auth-service
-    ports:
-      - "8000:8000"
+    build: ./VKR/auth-service
+    environment:
+      SECRET_KEY: 9788e7abfec543f18bf8f225f566f750
+      DATABASE_URL: postgresql+psycopg2://user:password@postgres:5432/auth_db
+      SITE_URL: ${SITE_URL:-http://localhost:8080}
     depends_on:
       postgres:
         condition: service_healthy
-    environment:
-      - SECRET_KEY=9788e7abfec543f18bf8f225f566f750
-      - DATABASE_URL=postgresql+psycopg2://user:password@postgres:5432/auth_db
-    volumes:
-      - ./auth-service:/app
 
   whisper-service:
-    build: ./whisper-service
-    container_name: whisper-service
-    # можно передавать env через файл .env внутри whisper-service
-    env_file:
-      - ./whisper-service/.env
+    build: ./VKR/whisper-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # nginx-шлюз: отдаёт фронт и проксирует /api и /whisper
+  gateway:
+    image: nginx:1.25
+    container_name: gateway
     ports:
-      - "9000:9000"
-    # кэш моделей, чтобы не скачивать заново на каждом билде
+      - "8080:80"
     volumes:
-      - ./whisper-service/models:/models
+      - ./gateway-nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./gateway-nginx/conf.d:/etc/nginx/conf.d:ro
+      # ↓ строка нужна ТОЛЬКО если используешь prod-режим со статики
+      # - ./calendar-frontend/build:/usr/share/nginx/html:ro
+    depends_on:
+      - auth-service
+      - whisper-service
+
+  # (опционально) телеграм-бот, если уже есть папка
+  telegram-bot:
+    build: ./VKR/telegram-bot
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      DATABASE_URL: postgresql+psycopg2://user:password@postgres:5432/auth_db
+      SITE_URL: ${SITE_URL:-http://localhost:8080}
+    depends_on:
+      postgres:
+        condition: service_healthy

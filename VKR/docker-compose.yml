@@ -1,0 +1,56 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: auth_db
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d auth_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ./db_data:/var/lib/postgresql/data
+
+  auth-service:
+    build: ./auth-service
+    container_name: auth-service
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - SECRET_KEY=9788e7abfec543f18bf8f225f566f750
+      - DATABASE_URL=postgresql+psycopg2://user:password@postgres:5432/auth_db
+    volumes:
+      - ./auth-service:/app
+
+  whisper-service:
+    build: ./whisper-service
+    container_name: whisper-service
+    # можно передавать env через файл .env внутри whisper-service
+    env_file:
+      - ./whisper-service/.env
+    ports:
+      - "9000:9000"
+    # кэш моделей, чтобы не скачивать заново на каждом билде
+    volumes:
+      - ./whisper-service/models:/models
+
+
+  telegram-bot:
+    build: ./telegram-bot
+    container_name: telegram-bot
+    depends_on:
+      - auth-service
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - BACKEND_URL=http://auth-service:8000
+      - SITE_URL=${SITE_URL}
