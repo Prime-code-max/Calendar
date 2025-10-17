@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
@@ -10,10 +10,17 @@ import ProfilePanel from "./components/ProfilePanel";
 import "./App.css";
 
 function App() {
-  // ====== ВАЖНО: базовые URL теперь через прокси Nginx ======
-  // по умолчанию фронт шлёт на http://localhost:8080/api/* и http://localhost:8080/whisper/*
-  const API_URL = process.env.REACT_APP_API_URL || "/api";
-  const WHISPER_URL = process.env.REACT_APP_WHISPER_URL || "/whisper";
+  // Базовые URL идут через Nginx-гейтвей
+  const API_URL = "/api";
+  const WHISPER_URL = "/whisper";
+
+  // ===== MOBILE DETECTION =====
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   // ===== THEME =====
   const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
@@ -23,9 +30,18 @@ function App() {
   }, [theme]);
 
   // ===== VIEW =====
-  const [calendarView, setCalendarView] = useState(
-    localStorage.getItem("calendarView") || "dayGridMonth"
-  );
+  // На мобильных — стартуем с listWeek, на десктопе — сохраняем предыдущее (или month)
+  const defaultView = isMobile
+    ? "listWeek"
+    : localStorage.getItem("calendarView") || "dayGridMonth";
+  const [calendarView, setCalendarView] = useState(defaultView);
+
+  useEffect(() => {
+    // если пользователь меняет размер, мягко переключаем на мобильный дефолт
+    if (isMobile && !calendarView.startsWith("list")) {
+      setCalendarView("listWeek");
+    }
+  }, [isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ===== AUTH / DATA =====
   const [token, setToken] = useState(localStorage.getItem("token") || "");
@@ -113,7 +129,6 @@ function App() {
       setAuth({ username: "", password: "" });
       setError("");
 
-      // подтянем профиль, чтобы применить тему и hideDone
       try {
         const pr = await fetch(`${API_URL}/profile`, {
           headers: { Authorization: `Bearer ${data.access_token}` },
@@ -225,26 +240,24 @@ function App() {
   };
 
   // ===== Группировка точных дублей =====
-  function decorateOverlaps(raw) {
-    const filtered = raw.filter((e) => (hideDone ? e.status !== "done" : true));
+  const enhanced = useMemo(() => {
+    const filtered = events.filter((e) => (hideDone ? e.status !== "done" : true));
     const groups = new Map();
     for (const ev of filtered) {
       const key = `${ev.start_time}__${ev.end_time}`;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(ev);
     }
-    const enhanced = [];
+    const result = [];
     for (const list of groups.values()) {
       list.sort((a, b) => Number(a.id) - Number(b.id));
       const count = list.length;
       list.forEach((ev, idx) => {
-        enhanced.push({ ...ev, __dupIndex: idx, __dupCount: count });
+        result.push({ ...ev, __dupIndex: idx, __dupCount: count });
       });
     }
-    return enhanced;
-  }
-
-  const enhanced = decorateOverlaps(events);
+    return result;
+  }, [events, hideDone]);
 
   const calendarEvents = enhanced.map((e) => ({
     id: e.id,
@@ -263,15 +276,37 @@ function App() {
   const renderEventContent = (arg) => {
     const { event } = arg;
     const { dupCount, status } = event.extendedProps || {};
+    // на мобильных делаем лаконичнее
+    const title =
+      isMobile && event.title.length > 30 ? event.title.slice(0, 30) + "…" : event.title;
+
     return (
       <div className={`evt-wrap ${status === "done" ? "evt-done" : ""}`}>
         <div className="evt-title">
-          {event.title}
-          {dupCount && dupCount > 1 && <span className="evt-badge">×{dupCount}</span>}
+          {title}
+          {!isMobile && dupCount && dupCount > 1 && (
+            <span className="evt-badge">×{dupCount}</span>
+          )}
         </div>
       </div>
     );
   };
+
+  // toolbar под мобильный
+  const headerToolbar = useMemo(() => {
+    if (isMobile) {
+      return {
+        left: "prev,next today",
+        center: "title",
+        right: "listDay,listWeek,dayGridMonth",
+      };
+    }
+    return {
+      left: "title",
+      center: "today prev,next",
+      right: "timeGridDay,timeGridWeek,dayGridMonth,listYear",
+    };
+  }, [isMobile]);
 
   // ===== AUTH SCREEN =====
   if (!token) {
@@ -315,19 +350,24 @@ function App() {
           <span className="dot" /> Календарь
         </div>
 
+        {/* на мобильных прячем часть кнопок в «плавающую» + оставляем только профиль */}
         <div className="actions">
           <button className="btn" onClick={() => setProfileOpen(true)}>Профиль</button>
-          <button className="btn" onClick={() => setShowForm(true)}>Новое событие</button>
-          <button
-            className="btn ghost"
-            onClick={() => {
-              localStorage.removeItem("token");
-              setToken("");
-              setEvents([]);
-            }}
-          >
-            Выйти
-          </button>
+          {!isMobile && (
+            <>
+              <button className="btn" onClick={() => setShowForm(true)}>Новое событие</button>
+              <button
+                className="btn ghost"
+                onClick={() => {
+                  localStorage.removeItem("token");
+                  setToken("");
+                  setEvents([]);
+                }}
+              >
+                Выйти
+              </button>
+            </>
+          )}
         </div>
       </header>
 
@@ -349,9 +389,9 @@ function App() {
         setHideDone={setHideDone}
       />
 
-      {/* Голосовая заметка */}
-      <div className="card">
-        <h3 style={{ marginBottom: 8 }}>Голосовая заметка</h3>
+      {/* Голосовая заметка: на мобильных – карточка компактнее */}
+      <div className="card" style={isMobile ? { padding: 12 } : undefined}>
+        <h3 style={{ marginBottom: 8, fontSize: isMobile ? 16 : 18 }}>Голосовая заметка</h3>
         <VoiceRecorder
           whisperUrl={WHISPER_URL}
           token={token}
@@ -368,29 +408,32 @@ function App() {
       </div>
 
       {/* Календарь */}
-      <div className="card">
+      <div className="card" style={isMobile ? { padding: 0 } : undefined}>
         <FullCalendar
           plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, listPlugin]}
           initialView={calendarView}
-          height="68vh"
+          // Мобильная высота — авто; десктоп — ранее было фикс. Зададим авто везде, пусть растёт с контентом.
+          height="auto"
+          contentHeight="auto"
+          expandRows={true}
+          stickyHeaderDates={!isMobile}
           events={calendarEvents}
           eventContent={renderEventContent}
           eventClick={handleEventClick}
-          headerToolbar={{
-            left: "title",
-            center: "today prev,next",
-            right: "timeGridDay,timeGridWeek,dayGridMonth,listYear",
-          }}
+          headerToolbar={headerToolbar}
           datesSet={(info) => {
             if (info.view.type !== calendarView) {
               setCalendarView(info.view.type);
-              localStorage.setItem("calendarView", info.view.type);
+              // сохраняем предпочтение только для десктопа
+              if (!isMobile) {
+                localStorage.setItem("calendarView", info.view.type);
+              }
             }
           }}
           eventDidMount={(info) => {
             info.el.classList.add("evt-base");
             const { dupCount, dupIndex, status } = info.event.extendedProps || {};
-            if (dupCount > 1) {
+            if (dupCount > 1 && !isMobile) {
               info.el.classList.add("evt-dup");
               const jitter = (dupIndex % 3) - 1;
               info.el.style.transform = `translateY(${jitter * 1.5}px)`;
@@ -404,6 +447,32 @@ function App() {
         />
       </div>
 
+      {/* Floating Action Button (только на мобильных) */}
+      {isMobile && (
+        <button
+          aria-label="Новое событие"
+          onClick={() => setShowForm(true)}
+          style={{
+            position: "fixed",
+            right: 16,
+            bottom: 16,
+            width: 56,
+            height: 56,
+            borderRadius: "50%",
+            fontSize: 28,
+            lineHeight: "56px",
+            textAlign: "center",
+            boxShadow: "0 6px 18px rgba(0,0,0,.25)",
+            background: "var(--accent, #6c5ce7)",
+            color: "#fff",
+            border: "none",
+            zIndex: 999,
+          }}
+        >
+          +
+        </button>
+      )}
+
       {/* MODAL: create/edit */}
       {showForm && (
         <div
@@ -412,7 +481,13 @@ function App() {
             if (e.target === e.currentTarget) resetForm();
           }}
         >
-          <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dialogTitle"
+            style={isMobile ? { width: "92%", margin: "8vh auto" } : undefined}
+          >
             <div className="modal-header">
               <h3 id="dialogTitle">{editingEvent ? "Редактировать событие" : "Новое событие"}</h3>
               <button className="icon-btn" aria-label="Закрыть" onClick={resetForm}>×</button>
@@ -441,10 +516,10 @@ function App() {
                 />
               </label>
 
-              <div className="row">
+              <div className="row" style={isMobile ? { gap: 12, flexDirection: "column" } : undefined}>
                 <div className="field">
                   <span className="label">Цвет</span>
-                  <div className="color-row">
+                  <div className="color-row" style={isMobile ? { gap: 8, flexWrap: "wrap" } : undefined}>
                     {["#3788d8", "#2ecc71", "#f1c40f", "#e67e22", "#e74c3c", "#9b59b6", "#95a5a6"].map(
                       (c) => (
                         <button
@@ -469,8 +544,8 @@ function App() {
                 </div>
               </div>
 
-              <div className="row">
-                <label className="field">
+              <div className="row" style={isMobile ? { gap: 12, flexDirection: "column" } : undefined}>
+                <label className="field" style={{ flex: 1 }}>
                   <span className="label">Начало</span>
                   <input
                     className="input"
@@ -480,7 +555,7 @@ function App() {
                   />
                 </label>
 
-                <label className="field">
+                <label className="field" style={{ flex: 1 }}>
                   <span className="label">Окончание</span>
                   <input
                     className="input"
@@ -492,14 +567,21 @@ function App() {
               </div>
             </div>
 
-            <div className="modal-footer">
+            <div className="modal-footer" style={isMobile ? { gap: 8 } : undefined}>
               <button
                 className="btn primary"
                 onClick={editingEvent ? handleUpdateEvent : handleAddEvent}
+                style={isMobile ? { width: "100%" } : undefined}
               >
                 {editingEvent ? "Сохранить" : "Добавить"}
               </button>
-              <button className="btn ghost" onClick={resetForm}>Отмена</button>
+              <button
+                className="btn ghost"
+                onClick={resetForm}
+                style={isMobile ? { width: "100%" } : undefined}
+              >
+                Отмена
+              </button>
             </div>
           </div>
         </div>
@@ -513,14 +595,17 @@ function App() {
             if (e.target === e.currentTarget) setActionModalOpen(false);
           }}
         >
-          <div className="modal-card small">
+          <div
+            className="modal-card small"
+            style={isMobile ? { width: "92%", margin: "8vh auto" } : undefined}
+          >
             <div className="modal-header">
               <h3>Событие: {selectedEvent.title}</h3>
               <button className="icon-btn" aria-label="Закрыть" onClick={() => setActionModalOpen(false)}>×</button>
             </div>
             <div className="modal-body">
               {selectedEvent.description && <p className="muted">{selectedEvent.description}</p>}
-              <div className="row-buttons">
+              <div className="row-buttons" style={isMobile ? { flexDirection: "column", gap: 8 } : undefined}>
                 <button
                   className="btn"
                   onClick={() => {
@@ -535,15 +620,55 @@ function App() {
                     setActionModalOpen(false);
                     setShowForm(true);
                   }}
+                  style={isMobile ? { width: "100%" } : undefined}
                 >
                   ✏ Редактировать
                 </button>
-                <button className="btn" onClick={() => handleMarkDone(selectedEvent.id)}>✅ Выполнено</button>
-                <button className="btn danger" onClick={() => handleDeleteEvent(selectedEvent.id)}>🗑 Удалить</button>
+                <button
+                  className="btn"
+                  onClick={() => handleMarkDone(selectedEvent.id)}
+                  style={isMobile ? { width: "100%" } : undefined}
+                >
+                  ✅ Выполнено
+                </button>
+                <button
+                  className="btn danger"
+                  onClick={() => handleDeleteEvent(selectedEvent.id)}
+                  style={isMobile ? { width: "100%" } : undefined}
+                >
+                  🗑 Удалить
+                </button>
               </div>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Кнопка «Выйти» как нижний пункт на мобильных (чтобы не терялась) */}
+      {isMobile && (
+        <div style={{ height: 56 }} /> // небольшой нижний отступ, чтобы FAB не перекрывал
+      )}
+      {isMobile && (
+        <button
+          onClick={() => {
+            localStorage.removeItem("token");
+            setToken("");
+            setEvents([]);
+          }}
+          className="btn ghost"
+          style={{
+            position: "fixed",
+            left: 16,
+            bottom: 16,
+            height: 40,
+            padding: "0 14px",
+            zIndex: 999,
+            background: "var(--card-bg, #222)",
+            border: "1px solid var(--border, #333)",
+          }}
+        >
+          Выйти
+        </button>
       )}
     </div>
   );

@@ -225,7 +225,7 @@ def now_utc_iso() -> str:
 # =========================
 # FASTAPI APP
 # =========================
-app = FastAPI(title="Auth & Calendar API", version="1.0.0")
+app = FastAPI(title="Auth & Calendar API", version="1.0.0", root_path="/api")
 
 # CORS
 app.add_middleware(

@@ -4,55 +4,54 @@ services:
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: auth_db
-    volumes:
-      - ./VKR/db_data:/var/lib/postgresql/data
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d auth_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
+    volumes:
+      - ./VKR/db_data:/var/lib/postgresql/data
 
   auth-service:
     build: ./VKR/auth-service
     environment:
-      SECRET_KEY: 9788e7abfec543f18bf8f225f566f750
-      DATABASE_URL: postgresql+psycopg2://user:password@postgres:5432/auth_db
-      SITE_URL: ${SITE_URL:-http://localhost:8080}
+      DATABASE_URL: ${DATABASE_URL}
+      SECRET_KEY: ${SECRET_KEY}
+      CORS_ORIGINS: http://localhost:8080
     depends_on:
       postgres:
         condition: service_healthy
+    restart: unless-stopped
 
   whisper-service:
     build: ./VKR/whisper-service
-    depends_on:
-      postgres:
-        condition: service_healthy
+    restart: unless-stopped
 
-  # nginx-шлюз: отдаёт фронт и проксирует /api и /whisper
-  gateway:
-    image: nginx:1.25
-    container_name: gateway
-    ports:
-      - "8080:80"
-    volumes:
-      - ./gateway-nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./gateway-nginx/conf.d:/etc/nginx/conf.d:ro
-      # ↓ строка нужна ТОЛЬКО если используешь prod-режим со статики
-      # - ./calendar-frontend/build:/usr/share/nginx/html:ro
-    depends_on:
-      - auth-service
-      - whisper-service
-
-  # (опционально) телеграм-бот, если уже есть папка
   telegram-bot:
     build: ./VKR/telegram-bot
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      DATABASE_URL: postgresql+psycopg2://user:password@postgres:5432/auth_db
-      SITE_URL: ${SITE_URL:-http://localhost:8080}
+      PUBLIC_SITE_URL: ${PUBLIC_SITE_URL}
+      AUTH_API_URL: http://auth-service:8000   # бот ходит к бэку внутри сети
     depends_on:
-      postgres:
-        condition: service_healthy
+      - auth-service
+    restart: unless-stopped
+
+  frontend:
+    build: ./calendar-frontend
+    restart: unless-stopped
+
+  gateway:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./gateway-nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8080:80"       # снаружи 8080 → внутри 80
+    depends_on:
+      - frontend
+      - auth-service
+      - whisper-service
+    restart: unless-stopped

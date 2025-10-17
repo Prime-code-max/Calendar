@@ -50,6 +50,8 @@ services:
     container_name: telegram-bot
     depends_on:
       - auth-service
+    env_file:
+      - ./.env
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
       - BACKEND_URL=http://auth-service:8000
