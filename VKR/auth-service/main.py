@@ -16,6 +16,10 @@ import os
 import datetime as dt
 import time
 import uuid
+import hashlib
+import hmac
+import json
+import urllib.parse
 
 from icalendar import Calendar
 from dateutil import tz
@@ -28,6 +32,7 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")  # e.g. postgresql+psycopg2://user:password@postgres:5432/auth_db
 SECRET_KEY = os.getenv("SECRET_KEY", "fallback-secret-key")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 ALGORITHM = "HS256"
 
 # =========================
@@ -120,8 +125,8 @@ class EventCreate(BaseModel):
     title: str
     description: Optional[str] = None
     color: str = "#3788d8"
-    start_time: str
-    end_time: str
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
 
 
 class EventUpdate(BaseModel):
@@ -222,6 +227,95 @@ def now_utc_iso() -> str:
     return dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc).isoformat()
 
 
+def verify_telegram_webapp_data(init_data: str, bot_token: str) -> dict:
+    """
+    Verify Telegram WebApp initData signature according to Telegram docs.
+    Returns parsed user data if valid, raises HTTPException if invalid.
+    """
+    print(f"[DEBUG] Verifying Telegram WebApp data...")
+    print(f"[DEBUG] Bot token present: {bool(bot_token)}")
+    print(f"[DEBUG] Init data length: {len(init_data) if init_data else 0}")
+    
+    if not bot_token:
+        print("[ERROR] Bot token not configured")
+        raise HTTPException(status_code=500, detail="Bot token not configured")
+    
+    if not init_data:
+        print("[ERROR] No init data provided")
+        raise HTTPException(status_code=401, detail="No init data provided")
+    
+    # Parse URL-encoded data
+    parsed_data = urllib.parse.parse_qs(init_data)
+    print(f"[DEBUG] Parsed data keys: {list(parsed_data.keys())}")
+    
+    # Extract hash
+    hash_value = parsed_data.get('hash', [None])[0]
+    if not hash_value:
+        print("[ERROR] Missing hash in initData")
+        raise HTTPException(status_code=401, detail="Missing hash in initData")
+    
+    print(f"[DEBUG] Hash found: {hash_value[:10]}...")
+    
+    # Remove hash from data and build data_check_string
+    data_pairs = []
+    for key, values in parsed_data.items():
+        if key != 'hash' and values:
+            data_pairs.append((key, values[0]))
+    
+    print(f"[DEBUG] Data pairs: {data_pairs}")
+    
+    # Sort pairs and build data_check_string
+    data_pairs.sort()
+    data_check_string = '\n'.join([f"{key}={value}" for key, value in data_pairs])
+    print(f"[DEBUG] Data check string: {data_check_string}")
+    
+    # Alternative: try parsing as query string directly if the above fails
+    if not data_check_string:
+        print("[DEBUG] Trying alternative parsing method...")
+        # Split by & and parse each pair
+        pairs = init_data.split('&')
+        data_pairs = []
+        for pair in pairs:
+            if '=' in pair and not pair.startswith('hash='):
+                key, value = pair.split('=', 1)
+                data_pairs.append((key, value))
+        data_pairs.sort()
+        data_check_string = '\n'.join([f"{key}={value}" for key, value in data_pairs])
+        print(f"[DEBUG] Alternative data check string: {data_check_string}")
+    
+    # Compute secret key
+    secret_key = hashlib.sha256(bot_token.encode()).digest()
+    print(f"[DEBUG] Secret key computed: {secret_key.hex()[:10]}...")
+    
+    # Compute HMAC
+    computed_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    print(f"[DEBUG] Computed hash: {computed_hash}")
+    print(f"[DEBUG] Received hash: {hash_value}")
+    
+    # Compare hashes
+    if not hmac.compare_digest(hash_value, computed_hash):
+        print("[ERROR] Hash comparison failed")
+        raise HTTPException(status_code=401, detail="Invalid signature")
+    
+    print("[DEBUG] Hash verification successful")
+    
+    # Extract user data
+    user_data = parsed_data.get('user', [None])[0]
+    if not user_data:
+        print("[ERROR] Missing user data")
+        raise HTTPException(status_code=401, detail="Missing user data")
+    
+    print(f"[DEBUG] User data: {user_data}")
+    
+    try:
+        user = json.loads(user_data)
+        print(f"[DEBUG] Parsed user: {user}")
+        return user
+    except json.JSONDecodeError as e:
+        print(f"[ERROR] JSON decode error: {e}")
+        raise HTTPException(status_code=401, detail="Invalid user data format")
+
+
 # =========================
 # FASTAPI APP
 # =========================
@@ -234,6 +328,7 @@ app.add_middleware(
         "http://localhost:3000",  # CRA dev
         "http://localhost",
         "http://127.0.0.1",
+        "http://localhost:8080",  # Gateway
         # при необходимости добавь сюда свой ngrok-URL
     ],
     allow_credentials=True,
@@ -246,11 +341,30 @@ app.add_middleware(
 # =========================
 @app.post("/register")
 def register(user: UserCreate, db: Session = Depends(get_db)):
-    existing = db.query(User).filter(User.username == user.username).first()
+    # Validate username
+    if not user.username or not user.username.strip():
+        raise HTTPException(status_code=400, detail="username required")
+    
+    # Validate password
+    if not user.password or not user.password.strip():
+        raise HTTPException(status_code=400, detail="password required")
+    
+    # Trim and validate length
+    username = user.username.strip()
+    password = user.password.strip()
+    
+    if len(username) > 150:
+        raise HTTPException(status_code=400, detail="username too long (max 150 characters)")
+    
+    if len(password) > 72:
+        raise HTTPException(status_code=400, detail="password too long (max 72 characters)")
+    
+    existing = db.query(User).filter(User.username == username).first()
     if existing:
         raise HTTPException(status_code=400, detail="Username already registered")
-    hashed_pw = get_password_hash(user.password)
-    new_user = User(username=user.username, hashed_password=hashed_pw)
+    
+    hashed_pw = get_password_hash(password)
+    new_user = User(username=username, hashed_password=hashed_pw)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
@@ -339,12 +453,40 @@ def create_event(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # Handle missing start_time/end_time with defaults
+    now_utc = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc)
+    
+    if event.start_time and event.end_time:
+        # Both provided - use as is
+        start_time = event.start_time
+        end_time = event.end_time
+    elif event.start_time and not event.end_time:
+        # Only start provided - end = start + 1 day
+        start_time = event.start_time
+        try:
+            start_dt = dt.datetime.fromisoformat(event.start_time.replace('Z', '+00:00'))
+            end_dt = start_dt + dt.timedelta(days=1)
+            end_time = end_dt.isoformat()
+        except ValueError:
+            # If parsing fails, use current time + 1 day
+            end_dt = now_utc + dt.timedelta(days=1)
+            end_time = end_dt.isoformat()
+    elif not event.start_time and event.end_time:
+        # Only end provided - start = now, end = provided
+        start_time = now_utc.isoformat()
+        end_time = event.end_time
+    else:
+        # Neither provided - start = now, end = now + 1 day
+        start_time = now_utc.isoformat()
+        end_dt = now_utc + dt.timedelta(days=1)
+        end_time = end_dt.isoformat()
+    
     new_event = Event(
         title=event.title,
         description=event.description,
         color=event.color,
-        start_time=event.start_time,
-        end_time=event.end_time,
+        start_time=start_time,
+        end_time=end_time,
         owner_id=user.id,
         status="pending",
     )
@@ -521,6 +663,10 @@ class TgConfirmIn(BaseModel):
     telegram_username: str | None = None
 
 
+class TgWebAppLoginIn(BaseModel):
+    initData: str
+
+
 @app.post("/telegram/confirm")
 def telegram_confirm(payload: TgConfirmIn, db: Session = Depends(get_db)):
     """
@@ -559,6 +705,64 @@ def telegram_confirm(payload: TgConfirmIn, db: Session = Depends(get_db)):
     return {"status": "ok"}
 
 
+@app.post("/tg/webapp/login")
+def telegram_webapp_login(payload: TgWebAppLoginIn, db: Session = Depends(get_db)):
+    """
+    Telegram Mini App login endpoint.
+    Verifies initData signature and creates/returns JWT token.
+    """
+    print(f"[DEBUG] Telegram WebApp login attempt")
+    print(f"[DEBUG] Payload received: {payload}")
+    print(f"[DEBUG] BOT_TOKEN configured: {bool(BOT_TOKEN)}")
+    
+    try:
+        # Verify Telegram WebApp data
+        user_data = verify_telegram_webapp_data(payload.initData, BOT_TOKEN)
+        telegram_user_id = user_data.get('id')
+        
+        print(f"[DEBUG] Telegram user ID: {telegram_user_id}")
+        
+        if not telegram_user_id:
+            print("[ERROR] Missing user ID in Telegram data")
+            raise HTTPException(status_code=401, detail="Missing user ID in Telegram data")
+        
+        # Look for existing user with this telegram_chat_id
+        user = db.query(User).filter(User.telegram_chat_id == str(telegram_user_id)).first()
+        
+        if not user:
+            print(f"[DEBUG] Creating new user for Telegram ID: {telegram_user_id}")
+            # Create new user
+            username = f"tg_{telegram_user_id}"
+            # Generate random password (user won't need it for Telegram login)
+            random_password = str(uuid.uuid4())
+            hashed_password = get_password_hash(random_password)
+            
+            user = User(
+                username=username,
+                hashed_password=hashed_password,
+                telegram_chat_id=str(telegram_user_id),
+                telegram_username=user_data.get('username')
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            print(f"[DEBUG] New user created: {username}")
+        else:
+            print(f"[DEBUG] Existing user found: {user.username}")
+        
+        # Create JWT token
+        token = create_access_token({"sub": user.username})
+        print(f"[DEBUG] JWT token created successfully")
+        return {"access_token": token, "token_type": "bearer"}
+        
+    except HTTPException as e:
+        print(f"[ERROR] HTTPException in login: {e.detail}")
+        raise
+    except Exception as e:
+        print(f"[ERROR] Unexpected error in login: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+
+
 # =========================
 # HEALTH / DB CHECK
 # =========================
@@ -569,3 +773,16 @@ def check_db(db: Session = Depends(get_db)):
         return {"db_status": "ok", "result": int(result)}
     except Exception as e:
         return {"db_status": "error", "detail": str(e)}
+
+
+@app.get("/tg/webapp/debug")
+def telegram_webapp_debug():
+    """
+    Debug endpoint to check Telegram WebApp configuration
+    """
+    return {
+        "bot_token_configured": bool(BOT_TOKEN),
+        "bot_token_length": len(BOT_TOKEN) if BOT_TOKEN else 0,
+        "telegram_webapp_available": True,
+        "endpoint_accessible": True
+    }

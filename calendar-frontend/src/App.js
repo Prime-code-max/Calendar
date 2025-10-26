@@ -7,6 +7,12 @@ import listPlugin from "@fullcalendar/list";
 
 import VoiceRecorder from "./components/VoiceRecorder";
 import ProfilePanel from "./components/ProfilePanel";
+import { 
+  isTelegramWebApp, 
+  initTelegramWebApp, 
+  applyTelegramTheme, 
+  loginWithTelegram 
+} from "./utils/telegram";
 import "./App.css";
 
 function App() {
@@ -22,12 +28,26 @@ function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  // ===== TELEGRAM WEBAPP =====
+  const [isTelegram, setIsTelegram] = useState(false);
+  
+  useEffect(() => {
+    const tg = initTelegramWebApp();
+    if (tg) {
+      setIsTelegram(true);
+      applyTelegramTheme();
+    }
+  }, []);
+
   // ===== THEME =====
   const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("theme", theme);
-  }, [theme]);
+    // If in Telegram, let Telegram control the theme
+    if (!isTelegram) {
+      document.documentElement.setAttribute("data-theme", theme);
+      localStorage.setItem("theme", theme);
+    }
+  }, [theme, isTelegram]);
 
   // ===== VIEW =====
   // На мобильных — стартуем с listWeek, на десктопе — сохраняем предыдущее (или month)
@@ -48,6 +68,7 @@ function App() {
   const [events, setEvents] = useState([]);
   const [hideDone, setHideDone] = useState(false);
   const [error, setError] = useState("");
+  const [telegramLoginAttempted, setTelegramLoginAttempted] = useState(false);
 
   // Profile panel
   const [profileOpen, setProfileOpen] = useState(false);
@@ -58,6 +79,46 @@ function App() {
   const [actionModalOpen, setActionModalOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
 
+  // ===== MODAL SCROLL LOCK =====
+  useEffect(() => {
+    const isModalOpen = showForm || actionModalOpen || profileOpen;
+    if (isModalOpen) {
+      // Prevent body scroll when modal is open
+      document.body.style.overflow = 'hidden';
+      document.body.style.paddingRight = '0px'; // Prevent layout shift
+    } else {
+      // Restore body scroll when modal is closed
+      document.body.style.overflow = '';
+      document.body.style.paddingRight = '';
+    }
+    
+    // Cleanup on unmount
+    return () => {
+      document.body.style.overflow = '';
+      document.body.style.paddingRight = '';
+    };
+  }, [showForm, actionModalOpen, profileOpen]);
+
+  // Telegram auto-login
+  useEffect(() => {
+    if (isTelegram && !token && !telegramLoginAttempted) {
+      setTelegramLoginAttempted(true);
+      (async () => {
+        try {
+          console.log("[DEBUG] Attempting Telegram auto-login...");
+          const result = await loginWithTelegram(API_URL);
+          localStorage.setItem("token", result.access_token);
+          setToken(result.access_token);
+          setError("");
+          console.log("[DEBUG] Telegram login successful");
+        } catch (e) {
+          console.error("Telegram login failed:", e);
+          setError(`Telegram login failed: ${e.message}. Please use regular login below.`);
+        }
+      })();
+    }
+  }, [isTelegram, token, telegramLoginAttempted, API_URL]);
+
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -67,6 +128,8 @@ function App() {
   });
 
   const [auth, setAuth] = useState({ username: "", password: "" });
+  const [authErrors, setAuthErrors] = useState({ username: "", password: "" });
+  const [formErrors, setFormErrors] = useState({ title: "", start_time: "", end_time: "" });
 
   // fetch events
   useEffect(() => {
@@ -89,13 +152,49 @@ function App() {
     })();
   }, [token, API_URL]);
 
+  // ===== VALIDATION =====
+  const validateAuth = () => {
+    const errors = { username: "", password: "" };
+    
+    if (!auth.username || !auth.username.trim()) {
+      errors.username = "Username is required";
+    } else if (auth.username.trim().length > 150) {
+      errors.username = "Username too long (max 150 characters)";
+    }
+    
+    if (!auth.password || !auth.password.trim()) {
+      errors.password = "Password is required";
+    } else if (auth.password.trim().length > 72) {
+      errors.password = "Password too long (max 72 characters)";
+    }
+    
+    setAuthErrors(errors);
+    return !errors.username && !errors.password;
+  };
+
+  const validateForm = () => {
+    const errors = { title: "", start_time: "", end_time: "" };
+    
+    if (!form.title || !form.title.trim()) {
+      errors.title = "Title is required";
+    }
+    
+    setFormErrors(errors);
+    return !errors.title;
+  };
+
   // ===== AUTH =====
   const handleRegister = async () => {
+    if (!validateAuth()) return;
+    
     try {
       const res = await fetch(`${API_URL}/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(auth),
+        body: JSON.stringify({
+          username: auth.username.trim(),
+          password: auth.password.trim()
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -103,6 +202,7 @@ function App() {
       }
       alert("Регистрация успешна! Теперь войдите.");
       setAuth({ username: "", password: "" });
+      setAuthErrors({ username: "", password: "" });
       setError("");
     } catch (e) {
       setError(String(e.message || e));
@@ -153,19 +253,32 @@ function App() {
       start_time: "",
       end_time: "",
     });
+    setFormErrors({ title: "", start_time: "", end_time: "" });
     setEditingEvent(null);
     setShowForm(false);
   };
 
   const handleAddEvent = async () => {
+    if (!validateForm()) return;
+    
     try {
+      // Set defaults for missing times
+      const now = new Date();
+      const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      
+      const eventData = {
+        ...form,
+        start_time: form.start_time || now.toISOString().slice(0, 16),
+        end_time: form.end_time || tomorrow.toISOString().slice(0, 16)
+      };
+      
       const res = await fetch(`${API_URL}/events`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(form),
+        body: JSON.stringify(eventData),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -304,7 +417,7 @@ function App() {
     return {
       left: "title",
       center: "today prev,next",
-      right: "timeGridDay,timeGridWeek,dayGridMonth,listYear",
+      right: "timeGridDay,timeGridWeek,dayGridMonth,listWeek",
     };
   }, [isMobile]);
 
@@ -317,26 +430,90 @@ function App() {
         </div>
 
         <div className="panel">
-          <h2>Вход / Регистрация</h2>
-          {error && <div className="alert">{error}</div>}
-          <input
-            className="input"
-            type="text"
-            placeholder="Username"
-            value={auth.username}
-            onChange={(e) => setAuth({ ...auth, username: e.target.value })}
-          />
-          <input
-            className="input"
-            type="password"
-            placeholder="Password"
-            value={auth.password}
-            onChange={(e) => setAuth({ ...auth, password: e.target.value })}
-          />
-          <div className="row-buttons">
-            <button className="btn primary" onClick={handleLogin}>Войти</button>
-            <button className="btn ghost" onClick={handleRegister}>Регистрация</button>
-          </div>
+          {isTelegram ? (
+            <>
+              <h2>Telegram Mini App</h2>
+              {error && <div className="alert">{error}</div>}
+              {telegramLoginAttempted && !error ? (
+                <div className="alert">Авторизация через Telegram...</div>
+              ) : !telegramLoginAttempted ? (
+                <div className="alert">Нажмите кнопку для входа через Telegram</div>
+              ) : null}
+              
+              {/* Show fallback login form if Telegram login failed */}
+              {error && (
+                <>
+                  <hr style={{ margin: "20px 0", border: "1px solid var(--border, #333)" }} />
+                  <h3>Альтернативный вход</h3>
+                  <input
+                    className={`input ${authErrors.username ? 'error' : ''}`}
+                    type="text"
+                    placeholder="Username"
+                    value={auth.username}
+                    onChange={(e) => {
+                      setAuth({ ...auth, username: e.target.value });
+                      if (authErrors.username) {
+                        setAuthErrors({ ...authErrors, username: "" });
+                      }
+                    }}
+                  />
+                  {authErrors.username && <div className="field-error">{authErrors.username}</div>}
+                  <input
+                    className={`input ${authErrors.password ? 'error' : ''}`}
+                    type="password"
+                    placeholder="Password"
+                    value={auth.password}
+                    onChange={(e) => {
+                      setAuth({ ...auth, password: e.target.value });
+                      if (authErrors.password) {
+                        setAuthErrors({ ...authErrors, password: "" });
+                      }
+                    }}
+                  />
+                  {authErrors.password && <div className="field-error">{authErrors.password}</div>}
+                  <div className="row-buttons">
+                    <button className="btn primary" onClick={handleLogin}>Войти</button>
+                    <button className="btn ghost" onClick={handleRegister}>Регистрация</button>
+                  </div>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <h2>Вход / Регистрация</h2>
+              {error && <div className="alert">{error}</div>}
+              <input
+                className={`input ${authErrors.username ? 'error' : ''}`}
+                type="text"
+                placeholder="Username"
+                value={auth.username}
+                onChange={(e) => {
+                  setAuth({ ...auth, username: e.target.value });
+                  if (authErrors.username) {
+                    setAuthErrors({ ...authErrors, username: "" });
+                  }
+                }}
+              />
+              {authErrors.username && <div className="field-error">{authErrors.username}</div>}
+              <input
+                className={`input ${authErrors.password ? 'error' : ''}`}
+                type="password"
+                placeholder="Password"
+                value={auth.password}
+                onChange={(e) => {
+                  setAuth({ ...auth, password: e.target.value });
+                  if (authErrors.password) {
+                    setAuthErrors({ ...authErrors, password: "" });
+                  }
+                }}
+              />
+              {authErrors.password && <div className="field-error">{authErrors.password}</div>}
+              <div className="row-buttons">
+                <button className="btn primary" onClick={handleLogin}>Войти</button>
+                <button className="btn ghost" onClick={handleRegister}>Регистрация</button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     );
@@ -382,16 +559,19 @@ function App() {
         theme={theme}
         setTheme={(t) => {
           setTheme(t);
-          document.documentElement.setAttribute("data-theme", t);
-          localStorage.setItem("theme", t);
+          if (!isTelegram) {
+            document.documentElement.setAttribute("data-theme", t);
+            localStorage.setItem("theme", t);
+          }
         }}
         hideDone={hideDone}
         setHideDone={setHideDone}
+        isTelegram={isTelegram}
       />
 
       {/* Голосовая заметка: на мобильных – карточка компактнее */}
-      <div className="card" style={isMobile ? { padding: 12 } : undefined}>
-        <h3 style={{ marginBottom: 8, fontSize: isMobile ? 16 : 18 }}>Голосовая заметка</h3>
+      <div className={`card voice-recorder-container ${isMobile ? 'mobile' : ''}`}>
+        <h3>Голосовая заметка</h3>
         <VoiceRecorder
           whisperUrl={WHISPER_URL}
           token={token}
@@ -450,24 +630,9 @@ function App() {
       {/* Floating Action Button (только на мобильных) */}
       {isMobile && (
         <button
+          className="floating-action-button"
           aria-label="Новое событие"
           onClick={() => setShowForm(true)}
-          style={{
-            position: "fixed",
-            right: 16,
-            bottom: 16,
-            width: 56,
-            height: 56,
-            borderRadius: "50%",
-            fontSize: 28,
-            lineHeight: "56px",
-            textAlign: "center",
-            boxShadow: "0 6px 18px rgba(0,0,0,.25)",
-            background: "var(--accent, #6c5ce7)",
-            color: "#fff",
-            border: "none",
-            zIndex: 999,
-          }}
         >
           +
         </button>
@@ -477,12 +642,9 @@ function App() {
       {showForm && (
         <div
           className="modal-overlay"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) resetForm();
-          }}
         >
           <div
-            className="modal-card"
+            className="modal-card event-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="dialogTitle"
@@ -497,12 +659,18 @@ function App() {
               <label className="field">
                 <span className="label">Заголовок</span>
                 <input
-                  className="input"
+                  className={`input ${formErrors.title ? 'error' : ''}`}
                   type="text"
                   placeholder="Например: Встреча с командой"
                   value={form.title}
-                  onChange={(e) => setForm({ ...form, title: e.target.value })}
+                  onChange={(e) => {
+                    setForm({ ...form, title: e.target.value });
+                    if (formErrors.title) {
+                      setFormErrors({ ...formErrors, title: "" });
+                    }
+                  }}
                 />
+                {formErrors.title && <div className="field-error">{formErrors.title}</div>}
               </label>
 
               <label className="field">
@@ -646,7 +814,7 @@ function App() {
 
       {/* Кнопка «Выйти» как нижний пункт на мобильных (чтобы не терялась) */}
       {isMobile && (
-        <div style={{ height: 56 }} /> // небольшой нижний отступ, чтобы FAB не перекрывал
+        <div style={{ height: 80 }} /> // небольшой нижний отступ, чтобы FAB не перекрывал
       )}
       {isMobile && (
         <button
@@ -655,17 +823,7 @@ function App() {
             setToken("");
             setEvents([]);
           }}
-          className="btn ghost"
-          style={{
-            position: "fixed",
-            left: 16,
-            bottom: 16,
-            height: 40,
-            padding: "0 14px",
-            zIndex: 999,
-            background: "var(--card-bg, #222)",
-            border: "1px solid var(--border, #333)",
-          }}
+          className="mobile-logout-button"
         >
           Выйти
         </button>

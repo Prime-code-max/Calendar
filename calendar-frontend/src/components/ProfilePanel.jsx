@@ -10,6 +10,7 @@ export default function ProfilePanel({
   hideDone,
   setHideDone,
   setTimezoneApplied,
+  isTelegram = false,
 }) {
   const [loading, setLoading] = useState(true);
   const [tz, setTz] = useState("Europe/Amsterdam");
@@ -185,8 +186,9 @@ export default function ProfilePanel({
                       type="checkbox"
                       checked={theme === "dark"}
                       onChange={() => setTheme(theme === "dark" ? "light" : "dark")}
+                      disabled={isTelegram}
                     />
-                    <span>Тёмная тема</span>
+                    <span>Тёмная тема{isTelegram ? " (управляется Telegram)" : ""}</span>
                   </label>
 
                   <label className="switch">

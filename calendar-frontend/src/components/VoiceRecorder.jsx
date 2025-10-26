@@ -109,19 +109,19 @@ export default function VoiceRecorder({ whisperUrl = "http://localhost:9000", to
   const disabled = !window.MediaRecorder || supportedMime === null;
 
   return (
-    <div className="card" style={{ marginTop: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+    <div className="voice-recorder-content">
+      <div className="voice-recorder-controls">
         <button
-          className={`btn ${isRecording ? "danger" : "primary"}`}
+          className={`btn voice-recorder-button ${isRecording ? "danger" : "primary"}`}
           onClick={isRecording ? stopRecording : startRecording}
           disabled={disabled}
         >
           {isRecording ? "■ Стоп" : "● Записать голос"}
         </button>
-        {isRecording && <span style={{ opacity: 0.8 }}>Запись: {mmss(elapsed)}</span>}
-        {disabled && <span style={{ color: "orange" }}>Браузер не поддерживает MediaRecorder</span>}
+        {isRecording && <span className="recording-timer">Запись: {mmss(elapsed)}</span>}
+        {disabled && <span className="recorder-error">Браузер не поддерживает MediaRecorder</span>}
       </div>
-      {error && <div className="alert" style={{ marginTop: 10 }}>{error}</div>}
+      {error && <div className="alert">{error}</div>}
     </div>
   );
 }

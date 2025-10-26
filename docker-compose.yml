@@ -1,8 +1,8 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:15
+    env_file:
+      - ./.env
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -17,9 +17,12 @@ services:
 
   auth-service:
     build: ./VKR/auth-service
+    env_file:
+      - ./.env
     environment:
       DATABASE_URL: ${DATABASE_URL}
       SECRET_KEY: ${SECRET_KEY}
+      BOT_TOKEN: ${BOT_TOKEN}
       CORS_ORIGINS: http://localhost:8080
     depends_on:
       postgres:
@@ -32,10 +35,11 @@ services:
 
   telegram-bot:
     build: ./VKR/telegram-bot
+    container_name: telegram-bot
+    env_file:
+      - ./.env
     environment:
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      PUBLIC_SITE_URL: ${PUBLIC_SITE_URL}
-      AUTH_API_URL: http://auth-service:8000   # бот ходит к бэку внутри сети
+      BACKEND_URL: http://auth-service:8000
     depends_on:
       - auth-service
     restart: unless-stopped
