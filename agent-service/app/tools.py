@@ -7,6 +7,7 @@ from .db_utils import (
     add_event_to_db as db_add_event,
     get_events_by_user as db_get_events
 )
+from .context import get_user_id
 import logging
 
 logger = logging.getLogger(__name__)
@@ -50,16 +51,21 @@ def safe_from_isoformat(dt_str: str) -> datetime:
 @tool
 def add_event_to_db(input_str: str) -> str:
     """
-    Добавляет событие. Формат:
-    owner_id=1, title="Встреча", description="Обсудить", start_time="2025-04-06T09:00", end_time="2025-04-06T10:00", color="blue"
+    Добавляет событие для текущего пользователя. Формат:
+    title="Встреча", description="Обсудить", start_time="2025-04-06T09:00", end_time="2025-04-06T10:00", color="blue"
+    
+    Примечание: owner_id определяется автоматически из текущей сессии пользователя.
     """
     try:
+        # Get user_id from context (set by the request handler)
+        owner_id = get_user_id()
+        
         # Парсинг строки
         parsed = {}
+        # Игнорируем owner_id если указан - используем из контекста
         owner_match = re.search(r'owner_id\s*=\s*(\d+)', input_str)
-        if not owner_match:
-            return "Ошибка: owner_id обязателен и должен быть числом."
-        parsed['owner_id'] = int(owner_match.group(1))
+        if owner_match:
+            logger.warning(f"User attempted to specify owner_id, but using context user_id={owner_id} instead")
 
         for field in ['title', 'description', 'color', 'status']:
             m = re.search(rf'{field}\s*=\s*"([^"]*)"', input_str)
@@ -77,7 +83,6 @@ def add_event_to_db(input_str: str) -> str:
             else:
                 return f"Ошибка: поле {field} обязательно."
 
-        owner_id = parsed['owner_id']
         title = parsed.get('title')
         description = parsed.get('description')
         start_time = parsed['start_time']
@@ -88,17 +93,27 @@ def add_event_to_db(input_str: str) -> str:
         if not all([title, description]):
             return "Ошибка: title и description обязательны."
 
+        # Use owner_id from context, not from user input
         event = db_add_event(owner_id, title, description, start_time, end_time, color, status)
         return f"Событие создано с ID {event['id']}. {title} ({start_time} – {end_time})"
 
+    except RuntimeError as e:
+        logger.error(f"Context error in add_event_to_db: {e}")
+        return f"Ошибка контекста: {str(e)}"
     except Exception as e:
         logger.error(f"add_event_to_db error: {e}")
         return f"Ошибка: {str(e)}"
 
 @tool
-def get_events_by_user(owner_id: int) -> str:
-    """Возвращает все события пользователя по owner_id."""
+def get_events_by_user() -> str:
+    """Возвращает все события текущего пользователя.
+    
+    Примечание: события возвращаются автоматически для пользователя текущей сессии.
+    """
     try:
+        # Get user_id from context (set by the request handler)
+        owner_id = get_user_id()
+        
         events = db_get_events(owner_id)
         if not events:
             return "No events found for this user."
@@ -111,6 +126,9 @@ def get_events_by_user(owner_id: int) -> str:
                 f"color='{e['color']}', status='{e['status']}')"
             )
         return "\n".join(lines)
+    except RuntimeError as e:
+        logger.error(f"Context error in get_events_by_user: {e}")
+        return f"Ошибка контекста: {str(e)}"
     except Exception as e:
         logger.error(f"get_events_by_user error: {e}")
         return f"Ошибка получения событий: {str(e)}"

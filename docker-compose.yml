@@ -48,8 +48,12 @@ services:
     build: ./agent-service
     ports:
       - "8000:8000"
+    env_file:
+      - ./.env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      SECRET_KEY: ${SECRET_KEY}
+      API_LLM: ${API_LLM}
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,4 +74,5 @@ services:
       - frontend
       - auth-service
       - whisper-service
+      - agent-service
     restart: unless-stopped
