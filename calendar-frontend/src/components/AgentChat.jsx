@@ -16,7 +16,25 @@ export default function AgentChat({ whisperUrl = "/whisper", agentUrl = "/api/ag
   const streamRef = useRef(null);
   
   const messagesEndRef = useRef(null);
+  const messagesContainerRef = useRef(null);
   const inputRef = useRef(null);
+
+  // Helper function to check if user is near the bottom of the chat
+  const isNearBottom = (threshold = 150) => {
+    if (!messagesContainerRef.current) return true;
+    const container = messagesContainerRef.current;
+    // Calculate distance from bottom
+    // After a new message is added, scrollHeight increases, but scrollTop stays the same
+    // So we check if user is within threshold of the PREVIOUS bottom
+    const scrollTop = container.scrollTop;
+    const scrollHeight = container.scrollHeight;
+    const clientHeight = container.clientHeight;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    return distanceFromBottom <= threshold;
+  };
+
+  // Track if this is the initial load to auto-scroll on first load
+  const isInitialLoadRef = useRef(true);
 
   // Load chat history on mount
   useEffect(() => {
@@ -42,6 +60,7 @@ export default function AgentChat({ whisperUrl = "/whisper", agentUrl = "/api/ag
               timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
             }));
             setMessages(formattedMessages);
+            isInitialLoadRef.current = true; // Mark as initial load
           }
         }
       } catch (e) {
@@ -53,9 +72,39 @@ export default function AgentChat({ whisperUrl = "/whisper", agentUrl = "/api/ag
     loadHistory();
   }, [token, agentUrl]); // Load when token or agentUrl changes
 
-  // Auto-scroll to bottom when messages change
+  // Auto-scroll to bottom when messages change, but only if user is near the bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (messages.length === 0) return;
+    
+    // Always scroll to bottom on initial load (when history is loaded)
+    if (isInitialLoadRef.current) {
+      // Small delay to ensure DOM is updated
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+        isInitialLoadRef.current = false;
+      }, 50);
+      return;
+    }
+    
+    // For new messages, check scroll position after DOM has updated
+    // Use requestAnimationFrame to ensure DOM is fully rendered before checking
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        // Double RAF ensures the DOM has fully updated with new messages
+        // When a new message is added:
+        // - scrollHeight increases by the message height
+        // - scrollTop stays the same (user hasn't scrolled)
+        // - So if user was at bottom before, they're now some distance from the new bottom
+        // We check if they're within 150px of the bottom, which accounts for:
+        //   1. They were near bottom before (within 150px)
+        //   2. The new message height might push them slightly away
+        // Only auto-scroll if user is already near the bottom
+        // This prevents disrupting users who are reading older messages
+        if (isNearBottom(150)) {
+          messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        }
+      });
+    });
   }, [messages]);
 
   // Detect supported audio MIME type
@@ -196,7 +245,9 @@ export default function AgentChat({ whisperUrl = "/whisper", agentUrl = "/api/ag
       setIsLoading(true);
       setError("");
       
-      const res = await fetch(`${whisperUrl}/transcribe`, {
+      // Ensure whisperUrl has a trailing slash for proper routing
+      const whisperEndpoint = whisperUrl.endsWith('/') ? `${whisperUrl}transcribe` : `${whisperUrl}/transcribe`;
+      const res = await fetch(whisperEndpoint, {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: fd,
@@ -212,6 +263,7 @@ export default function AgentChat({ whisperUrl = "/whisper", agentUrl = "/api/ag
 
       if (text.trim()) {
         // Automatically send transcribed text to agent
+        // The scroll will be handled by the useEffect when messages update
         await sendMessage(text);
       } else {
         setError("Не удалось распознать речь");
@@ -237,7 +289,7 @@ export default function AgentChat({ whisperUrl = "/whisper", agentUrl = "/api/ag
   return (
     <div className="agent-chat">
       {/* Messages area */}
-      <div className="agent-chat-messages">
+      <div className="agent-chat-messages" ref={messagesContainerRef}>
         {messages.length === 0 ? (
           <div className="agent-chat-empty">
             <p>Начните общение с AI-ассистентом. Введите сообщение или используйте микрофон.</p>

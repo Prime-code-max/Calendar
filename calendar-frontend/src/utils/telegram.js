@@ -7,6 +7,17 @@ export const isTelegramWebApp = () => {
   return typeof window !== 'undefined' && window.Telegram?.WebApp;
 };
 
+// Check if we have valid Telegram initData (required for authentication)
+export const hasTelegramInitData = () => {
+  const tg = getTelegramWebApp();
+  return tg && tg.initData && tg.initData.length > 0;
+};
+
+// Check if we're actually in a valid Telegram WebApp context with initData
+export const isInTelegramContext = () => {
+  return isTelegramWebApp() && hasTelegramInitData();
+};
+
 // Get Telegram WebApp instance
 export const getTelegramWebApp = () => {
   if (isTelegramWebApp()) {
@@ -87,10 +98,16 @@ export const applyTelegramTheme = () => {
 export const loginWithTelegram = async (apiUrl) => {
   console.log('[DEBUG] Starting Telegram login...');
   
+  // Check if we're actually in Telegram context before attempting login
+  if (!isInTelegramContext()) {
+    console.warn('[WARN] Not in valid Telegram context - skipping login');
+    throw new Error('Not in valid Telegram context');
+  }
+  
   const initData = getTelegramInitData();
   console.log('[DEBUG] Init data:', initData);
   
-  if (!initData) {
+  if (!initData || initData.length === 0) {
     console.error('[ERROR] No Telegram initData available');
     throw new Error('No Telegram initData available');
   }

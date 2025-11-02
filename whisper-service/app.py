@@ -8,8 +8,8 @@ from pydantic import BaseModel
 from faster_whisper import WhisperModel
 
 # ---------- Config ----------
-WHISPER_MODEL   = os.getenv("WHISPER_MODEL", "base")  # tiny, base, small, medium, large-v3
-COMPUTE_TYPE    = os.getenv("COMPUTE_TYPE", "int8")   # int8 / int8_float16 / float16 / float32
+WHISPER_MODEL   = os.getenv("WHISPER_MODEL", "medium")  # tiny, base, small, medium, large-v3
+COMPUTE_TYPE    = os.getenv("COMPUTE_TYPE", "float16")   # int8 / int8_float16 / float16 / float32
 DEVICE          = os.getenv("DEVICE", "cpu")          # "cpu" или "cuda"
 MODEL_CACHE_DIR = os.getenv("MODEL_CACHE_DIR", "/models")
 VAD_FILTER      = os.getenv("VAD_FILTER", "true").lower() == "true"

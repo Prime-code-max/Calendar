@@ -5,10 +5,11 @@ import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import listPlugin from "@fullcalendar/list";
 
-import VoiceRecorder from "./components/VoiceRecorder";
+import AgentChat from "./components/AgentChat";
 import ProfilePanel from "./components/ProfilePanel";
 import { 
   isTelegramWebApp, 
+  isInTelegramContext,
   initTelegramWebApp, 
   applyTelegramTheme, 
   loginWithTelegram 
@@ -32,10 +33,13 @@ function App() {
   const [isTelegram, setIsTelegram] = useState(false);
   
   useEffect(() => {
-    const tg = initTelegramWebApp();
-    if (tg) {
-      setIsTelegram(true);
-      applyTelegramTheme();
+    // Only set isTelegram if we're actually in a valid Telegram context with initData
+    if (isInTelegramContext()) {
+      const tg = initTelegramWebApp();
+      if (tg) {
+        setIsTelegram(true);
+        applyTelegramTheme();
+      }
     }
   }, []);
 
@@ -73,6 +77,12 @@ function App() {
   // Profile panel
   const [profileOpen, setProfileOpen] = useState(false);
 
+  // Tab state
+  const [activeTab, setActiveTab] = useState(() => {
+    // Try to restore from localStorage, default to 'calendar'
+    return localStorage.getItem("activeTab") || "calendar";
+  });
+
   // form + modals
   const [showForm, setShowForm] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
@@ -99,9 +109,19 @@ function App() {
     };
   }, [showForm, actionModalOpen, profileOpen]);
 
-  // Telegram auto-login
+  // Telegram auto-login - only attempt if we're actually in Telegram with valid initData
   useEffect(() => {
+    // Only attempt Telegram login if:
+    // 1. We're in Telegram context (with initData)
+    // 2. We don't have a token yet
+    // 3. We haven't already attempted login
     if (isTelegram && !token && !telegramLoginAttempted) {
+      // Double-check we have valid initData before attempting
+      if (!isInTelegramContext()) {
+        console.log("[DEBUG] Telegram WebApp detected but no initData - skipping auto-login");
+        return;
+      }
+      
       setTelegramLoginAttempted(true);
       (async () => {
         try {
@@ -113,7 +133,16 @@ function App() {
           console.log("[DEBUG] Telegram login successful");
         } catch (e) {
           console.error("Telegram login failed:", e);
-          setError(`Telegram login failed: ${e.message}. Please use regular login below.`);
+          // Only show error if we're actually in Telegram context
+          // If initData is missing, it means we're not in a real Telegram context,
+          // so don't show an error to regular web users
+          if (isInTelegramContext()) {
+            setError(`Telegram login failed: ${e.message}. Please use regular login below.`);
+          } else {
+            // Silently fail - user can use regular login
+            console.log("[DEBUG] Not in Telegram context - Telegram login skipped");
+            setTelegramLoginAttempted(false); // Allow fallback to regular login
+          }
         }
       })();
     }
@@ -433,15 +462,17 @@ function App() {
           {isTelegram ? (
             <>
               <h2>Telegram Mini App</h2>
-              {error && <div className="alert">{error}</div>}
-              {telegramLoginAttempted && !error ? (
+              {/* Show loading state while attempting login */}
+              {telegramLoginAttempted && !error && (
                 <div className="alert">Авторизация через Telegram...</div>
-              ) : !telegramLoginAttempted ? (
-                <div className="alert">Нажмите кнопку для входа через Telegram</div>
-              ) : null}
+              )}
+              {/* Show error only if login was attempted and failed */}
+              {error && error.includes("Telegram") && (
+                <div className="alert">{error}</div>
+              )}
               
               {/* Show fallback login form if Telegram login failed */}
-              {error && (
+              {error && error.includes("Telegram") && (
                 <>
                   <hr style={{ margin: "20px 0", border: "1px solid var(--border, #333)" }} />
                   <h3>Альтернативный вход</h3>
@@ -532,7 +563,9 @@ function App() {
           <button className="btn" onClick={() => setProfileOpen(true)}>Профиль</button>
           {!isMobile && (
             <>
-              <button className="btn" onClick={() => setShowForm(true)}>Новое событие</button>
+              {activeTab === "calendar" && (
+                <button className="btn" onClick={() => setShowForm(true)}>Новое событие</button>
+              )}
               <button
                 className="btn ghost"
                 onClick={() => {
@@ -569,26 +602,33 @@ function App() {
         isTelegram={isTelegram}
       />
 
-      {/* Голосовая заметка: на мобильных – карточка компактнее */}
-      <div className={`card voice-recorder-container ${isMobile ? 'mobile' : ''}`}>
-        <h3>Голосовая заметка</h3>
-        <VoiceRecorder
-          whisperUrl={WHISPER_URL}
-          token={token}
-          onTranscript={(text) => {
-            if (!text) return;
-            setForm((f) => ({
-              ...f,
-              title: text.length > 60 ? text.slice(0, 60) + "…" : text,
-              description: text,
-            }));
-            setShowForm(true);
+      {/* Tab Bar */}
+      <div className="tab-bar">
+        <button
+          className={`tab-btn ${activeTab === "calendar" ? "active" : ""}`}
+          onClick={() => {
+            setActiveTab("calendar");
+            localStorage.setItem("activeTab", "calendar");
           }}
-        />
+          aria-label="Calendar tab"
+        >
+          Календарь
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "chat" ? "active" : ""}`}
+          onClick={() => {
+            setActiveTab("chat");
+            localStorage.setItem("activeTab", "chat");
+          }}
+          aria-label="AI Assistant tab"
+        >
+          AI Ассистент
+        </button>
       </div>
 
-      {/* Календарь */}
-      <div className="card" style={isMobile ? { padding: 0 } : undefined}>
+      {/* Tab Content */}
+      {activeTab === "calendar" && (
+        <div className="card calendar-tab-content" style={isMobile ? { padding: 0 } : undefined}>
         <FullCalendar
           plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, listPlugin]}
           initialView={calendarView}
@@ -613,6 +653,15 @@ function App() {
           eventDidMount={(info) => {
             info.el.classList.add("evt-base");
             const { dupCount, dupIndex, status } = info.event.extendedProps || {};
+            
+            // Explicitly set background color to ensure it applies to short events
+            // FullCalendar sometimes doesn't apply backgroundColor for short duration events
+            if (info.event.backgroundColor) {
+              info.el.style.backgroundColor = info.event.backgroundColor;
+              // Also set border color for better visibility
+              info.el.style.borderColor = info.event.backgroundColor;
+            }
+            
             if (dupCount > 1 && !isMobile) {
               info.el.classList.add("evt-dup");
               const jitter = (dupIndex % 3) - 1;
@@ -626,9 +675,21 @@ function App() {
           }}
         />
       </div>
+      )}
 
-      {/* Floating Action Button (только на мобильных) */}
-      {isMobile && (
+      {activeTab === "chat" && (
+        <div className={`card agent-chat-container ${isMobile ? 'mobile' : ''}`}>
+          <h3>AI Ассистент</h3>
+          <AgentChat
+            whisperUrl={WHISPER_URL}
+            agentUrl={`${API_URL}/agent`}
+            token={token}
+          />
+        </div>
+      )}
+
+      {/* Floating Action Button (только на мобильных и только на вкладке календаря) */}
+      {isMobile && activeTab === "calendar" && (
         <button
           className="floating-action-button"
           aria-label="Новое событие"
