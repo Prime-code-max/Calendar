@@ -10,6 +10,15 @@ def fetch_user_by_id(user_id: int):
             return {"id": row.id, "username": row.username}
         return None
 
+def fetch_user_by_username(username: str):
+    """Fetch user by username."""
+    with get_db_sync() as conn:
+        result = conn.execute(text("SELECT id, username FROM users WHERE username = :username"), {"username": username})
+        row = result.fetchone()
+        if row:
+            return {"id": row.id, "username": row.username}
+        return None
+
 def add_user_to_db(name: str, email: str):
     with get_db_sync() as conn:
         existing = conn.execute(text("SELECT id FROM users WHERE email = :email"), {"email": email}).fetchone()
@@ -66,6 +75,65 @@ def get_events_by_user(owner_id: int):
                 "end_time": r.end_time,
                 "color": r.color,
                 "status": r.status
+            }
+            for r in rows
+        ]
+
+def init_chat_sessions_table():
+    """Initialize the chat_sessions table if it doesn't exist."""
+    with get_db_sync() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant')),
+                content TEXT NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_chat_sessions_timestamp ON chat_sessions(timestamp)"))
+        conn.commit()
+
+def save_chat_message(user_id: int, role: str, content: str):
+    """Save a chat message to the database."""
+    with get_db_sync() as conn:
+        result = conn.execute(
+            text("""
+                INSERT INTO chat_sessions (user_id, role, content, timestamp)
+                VALUES (:user_id, :role, :content, CURRENT_TIMESTAMP)
+                RETURNING id, timestamp
+            """),
+            {
+                "user_id": user_id,
+                "role": role,
+                "content": content
+            }
+        )
+        conn.commit()
+        row = result.fetchone()
+        return {"id": row.id, "timestamp": row.timestamp}
+
+def get_chat_history(user_id: int, limit: int = 20):
+    """Retrieve the last N messages for a user."""
+    with get_db_sync() as conn:
+        result = conn.execute(
+            text("""
+                SELECT role, content, timestamp
+                FROM chat_sessions
+                WHERE user_id = :user_id
+                ORDER BY timestamp ASC
+                LIMIT :limit
+            """),
+            {"user_id": user_id, "limit": limit}
+        )
+        rows = result.fetchall()
+        return [
+            {
+                "role": r.role,
+                "content": r.content,
+                "timestamp": r.timestamp
             }
             for r in rows
         ]
