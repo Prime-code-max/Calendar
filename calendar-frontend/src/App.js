@@ -5,20 +5,15 @@ import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import listPlugin from "@fullcalendar/list";
 
-import VoiceRecorder from "./components/VoiceRecorder";
+import AgentChat from "./components/AgentChat";
 import ProfilePanel from "./components/ProfilePanel";
-import { 
-  isTelegramWebApp, 
-  initTelegramWebApp, 
-  applyTelegramTheme, 
-  loginWithTelegram 
-} from "./utils/telegram";
 import "./App.css";
 
 function App() {
   // Базовые URL идут через Nginx-гейтвей
   const API_URL = "/api";
   const WHISPER_URL = "/whisper";
+  const AGENT_URL = "/api/agent";
 
   // ===== MOBILE DETECTION =====
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
@@ -28,26 +23,12 @@ function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // ===== TELEGRAM WEBAPP =====
-  const [isTelegram, setIsTelegram] = useState(false);
-  
-  useEffect(() => {
-    const tg = initTelegramWebApp();
-    if (tg) {
-      setIsTelegram(true);
-      applyTelegramTheme();
-    }
-  }, []);
-
   // ===== THEME =====
   const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
   useEffect(() => {
-    // If in Telegram, let Telegram control the theme
-    if (!isTelegram) {
-      document.documentElement.setAttribute("data-theme", theme);
-      localStorage.setItem("theme", theme);
-    }
-  }, [theme, isTelegram]);
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("theme", theme);
+  }, [theme]);
 
   // ===== VIEW =====
   // На мобильных — стартуем с listWeek, на десктопе — сохраняем предыдущее (или month)
@@ -68,7 +49,6 @@ function App() {
   const [events, setEvents] = useState([]);
   const [hideDone, setHideDone] = useState(false);
   const [error, setError] = useState("");
-  const [telegramLoginAttempted, setTelegramLoginAttempted] = useState(false);
 
   // Profile panel
   const [profileOpen, setProfileOpen] = useState(false);
@@ -98,26 +78,6 @@ function App() {
       document.body.style.paddingRight = '';
     };
   }, [showForm, actionModalOpen, profileOpen]);
-
-  // Telegram auto-login
-  useEffect(() => {
-    if (isTelegram && !token && !telegramLoginAttempted) {
-      setTelegramLoginAttempted(true);
-      (async () => {
-        try {
-          console.log("[DEBUG] Attempting Telegram auto-login...");
-          const result = await loginWithTelegram(API_URL);
-          localStorage.setItem("token", result.access_token);
-          setToken(result.access_token);
-          setError("");
-          console.log("[DEBUG] Telegram login successful");
-        } catch (e) {
-          console.error("Telegram login failed:", e);
-          setError(`Telegram login failed: ${e.message}. Please use regular login below.`);
-        }
-      })();
-    }
-  }, [isTelegram, token, telegramLoginAttempted, API_URL]);
 
   const [form, setForm] = useState({
     title: "",
@@ -430,90 +390,38 @@ function App() {
         </div>
 
         <div className="panel">
-          {isTelegram ? (
-            <>
-              <h2>Telegram Mini App</h2>
-              {error && <div className="alert">{error}</div>}
-              {telegramLoginAttempted && !error ? (
-                <div className="alert">Авторизация через Telegram...</div>
-              ) : !telegramLoginAttempted ? (
-                <div className="alert">Нажмите кнопку для входа через Telegram</div>
-              ) : null}
-              
-              {/* Show fallback login form if Telegram login failed */}
-              {error && (
-                <>
-                  <hr style={{ margin: "20px 0", border: "1px solid var(--border, #333)" }} />
-                  <h3>Альтернативный вход</h3>
-                  <input
-                    className={`input ${authErrors.username ? 'error' : ''}`}
-                    type="text"
-                    placeholder="Username"
-                    value={auth.username}
-                    onChange={(e) => {
-                      setAuth({ ...auth, username: e.target.value });
-                      if (authErrors.username) {
-                        setAuthErrors({ ...authErrors, username: "" });
-                      }
-                    }}
-                  />
-                  {authErrors.username && <div className="field-error">{authErrors.username}</div>}
-                  <input
-                    className={`input ${authErrors.password ? 'error' : ''}`}
-                    type="password"
-                    placeholder="Password"
-                    value={auth.password}
-                    onChange={(e) => {
-                      setAuth({ ...auth, password: e.target.value });
-                      if (authErrors.password) {
-                        setAuthErrors({ ...authErrors, password: "" });
-                      }
-                    }}
-                  />
-                  {authErrors.password && <div className="field-error">{authErrors.password}</div>}
-                  <div className="row-buttons">
-                    <button className="btn primary" onClick={handleLogin}>Войти</button>
-                    <button className="btn ghost" onClick={handleRegister}>Регистрация</button>
-                  </div>
-                </>
-              )}
-            </>
-          ) : (
-            <>
-              <h2>Вход / Регистрация</h2>
-              {error && <div className="alert">{error}</div>}
-              <input
-                className={`input ${authErrors.username ? 'error' : ''}`}
-                type="text"
-                placeholder="Username"
-                value={auth.username}
-                onChange={(e) => {
-                  setAuth({ ...auth, username: e.target.value });
-                  if (authErrors.username) {
-                    setAuthErrors({ ...authErrors, username: "" });
-                  }
-                }}
-              />
-              {authErrors.username && <div className="field-error">{authErrors.username}</div>}
-              <input
-                className={`input ${authErrors.password ? 'error' : ''}`}
-                type="password"
-                placeholder="Password"
-                value={auth.password}
-                onChange={(e) => {
-                  setAuth({ ...auth, password: e.target.value });
-                  if (authErrors.password) {
-                    setAuthErrors({ ...authErrors, password: "" });
-                  }
-                }}
-              />
-              {authErrors.password && <div className="field-error">{authErrors.password}</div>}
-              <div className="row-buttons">
-                <button className="btn primary" onClick={handleLogin}>Войти</button>
-                <button className="btn ghost" onClick={handleRegister}>Регистрация</button>
-              </div>
-            </>
-          )}
+          <h2>Вход / Регистрация</h2>
+          {error && <div className="alert">{error}</div>}
+          <input
+            className={`input ${authErrors.username ? 'error' : ''}`}
+            type="text"
+            placeholder="Username"
+            value={auth.username}
+            onChange={(e) => {
+              setAuth({ ...auth, username: e.target.value });
+              if (authErrors.username) {
+                setAuthErrors({ ...authErrors, username: "" });
+              }
+            }}
+          />
+          {authErrors.username && <div className="field-error">{authErrors.username}</div>}
+          <input
+            className={`input ${authErrors.password ? 'error' : ''}`}
+            type="password"
+            placeholder="Password"
+            value={auth.password}
+            onChange={(e) => {
+              setAuth({ ...auth, password: e.target.value });
+              if (authErrors.password) {
+                setAuthErrors({ ...authErrors, password: "" });
+              }
+            }}
+          />
+          {authErrors.password && <div className="field-error">{authErrors.password}</div>}
+          <div className="row-buttons">
+            <button className="btn primary" onClick={handleLogin}>Войти</button>
+            <button className="btn ghost" onClick={handleRegister}>Регистрация</button>
+          </div>
         </div>
       </div>
     );
@@ -559,31 +467,21 @@ function App() {
         theme={theme}
         setTheme={(t) => {
           setTheme(t);
-          if (!isTelegram) {
-            document.documentElement.setAttribute("data-theme", t);
-            localStorage.setItem("theme", t);
-          }
+          document.documentElement.setAttribute("data-theme", t);
+          localStorage.setItem("theme", t);
         }}
         hideDone={hideDone}
         setHideDone={setHideDone}
-        isTelegram={isTelegram}
+        isTelegram={false}
       />
 
-      {/* Голосовая заметка: на мобильных – карточка компактнее */}
-      <div className={`card voice-recorder-container ${isMobile ? 'mobile' : ''}`}>
-        <h3>Голосовая заметка</h3>
-        <VoiceRecorder
+      {/* AI Assistant Chat */}
+      <div className="card">
+        <h3 style={{ margin: "0 0 16px 0", fontSize: "18px" }}>AI Ассистент</h3>
+        <AgentChat
           whisperUrl={WHISPER_URL}
+          agentUrl={AGENT_URL}
           token={token}
-          onTranscript={(text) => {
-            if (!text) return;
-            setForm((f) => ({
-              ...f,
-              title: text.length > 60 ? text.slice(0, 60) + "…" : text,
-              description: text,
-            }));
-            setShowForm(true);
-          }}
         />
       </div>
 
