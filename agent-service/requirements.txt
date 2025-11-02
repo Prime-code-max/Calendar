@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+langchain==0.3.27
+langchain-openai
+langchainhub
+sqlalchemy
+psycopg2-binary
+python-dotenv
+jinja2

@@ -13,10 +13,10 @@ services:
       timeout: 5s
       retries: 10
     volumes:
-      - ./VKR/db_data:/var/lib/postgresql/data
+      - ./db_data:/var/lib/postgresql/data
 
   auth-service:
-    build: ./VKR/auth-service
+    build: ./auth-service
     env_file:
       - ./.env
     environment:
@@ -30,11 +30,11 @@ services:
     restart: unless-stopped
 
   whisper-service:
-    build: ./VKR/whisper-service
+    build: ./whisper-service
     restart: unless-stopped
 
   telegram-bot:
-    build: ./VKR/telegram-bot
+    build: ./telegram-bot
     container_name: telegram-bot
     env_file:
       - ./.env
@@ -43,6 +43,18 @@ services:
     depends_on:
       - auth-service
     restart: unless-stopped
+
+  agent-service:
+    build: ./agent-service
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./agent-service:/app
 
   frontend:
     build: ./calendar-frontend
