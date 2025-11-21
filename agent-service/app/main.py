@@ -41,7 +41,7 @@ def get_user_id_from_token(authorization: Optional[str] = Header(None)) -> Optio
     except (JWTError, Exception):
         return None
 
-llm = ChatOpenAI(
+scheduler_llm = ChatOpenAI(
     model="Qwen/Qwen3-235B-A22B-Instruct-2507",
     api_key="ZGMyMjU5NGItNTFkYi00MjQwLWI4NTYtN2I0ZmY0NmU3YzUz.d6efa3e5133a169b0f4f23b5a0fed976",
     base_url="https://foundation-models.api.cloud.ru/v1",
@@ -49,29 +49,36 @@ llm = ChatOpenAI(
     max_tokens=512,
 )
 
-tools = [get_current_time, get_user_by_id, add_user, add_event_to_db, get_events_by_user]
+scheduler_tools = [get_current_time, get_user_by_id, add_user, add_event_to_db, get_events_by_user]
 
 prompt = hub.pull("hwchase17/react")
-agent = create_react_agent(llm, tools, prompt)
+scheduler_agent = create_react_agent(scheduler_llm, scheduler_tools, prompt)
 
-agent_executor = AgentExecutor(
-    agent=agent,
-    tools=tools,
+scheduler_agent_executor = AgentExecutor(
+    agent=scheduler_agent,
+    tools=scheduler_tools,
     verbose=True,
     handle_parsing_errors="Попробуй снова. Следуй формату: Thought, Action, Action Input.",
     max_iterations=10
 )
 
+
+planner_llm = ChatOpenAI(
+    model="GigaChat/GigaChat-2-Max",
+    api_key="ZGMyMjU5NGItNTFkYi00MjQwLWI4NTYtN2I0ZmY0NmU3YzUz.d6efa3e5133a169b0f4f23b5a0fed976",
+    base_url="https://foundation-models.api.cloud.ru/v1",
+    temperature=0.5,
+    max_tokens=512,
+)
+
+
 app = FastAPI()
-templates = Jinja2Templates(directory="app/templates")
+
 
 class QuestionRequest(BaseModel):
     question: str
     user_id: Optional[int] = None
 
-@app.get("/", response_class=HTMLResponse)
-async def chat_ui(request: Request):
-    return templates.TemplateResponse("chat.html", {"request": request})
 
 @app.get("/chat/history")
 async def get_chat_history_endpoint(
@@ -147,7 +154,7 @@ async def ask_agent(
         try:
             # Invoke the agent with the full context
             # Tools will automatically use user_id from context
-            result = agent_executor.invoke({
+            result = scheduler_agent_executor.invoke({
                 "input": full_input,
                 "instructions": "Отвечай кратко и точно. Учитывай контекст предыдущих сообщений в беседе. Все события создаются для текущего пользователя автоматически - не нужно указывать owner_id."
             })
