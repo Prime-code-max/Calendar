@@ -7,6 +7,7 @@ import listPlugin from "@fullcalendar/list";
 
 import AgentChat from "./components/AgentChat";
 import ProfilePanel from "./components/ProfilePanel";
+<<<<<<< HEAD
 import { 
   isTelegramWebApp, 
   isInTelegramContext,
@@ -14,12 +15,15 @@ import {
   applyTelegramTheme, 
   loginWithTelegram 
 } from "./utils/telegram";
+=======
+>>>>>>> c01622961fe5d5c6e75acd11a66950f1da623435
 import "./App.css";
 
 function App() {
   // Базовые URL идут через Nginx-гейтвей
   const API_URL = "/api";
   const WHISPER_URL = "/whisper";
+  const AGENT_URL = "/api/agent";
 
   // ===== MOBILE DETECTION =====
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
@@ -29,6 +33,7 @@ function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+<<<<<<< HEAD
   // ===== TELEGRAM WEBAPP =====
   const [isTelegram, setIsTelegram] = useState(false);
   
@@ -43,15 +48,14 @@ function App() {
     }
   }, []);
 
+=======
+>>>>>>> c01622961fe5d5c6e75acd11a66950f1da623435
   // ===== THEME =====
   const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
   useEffect(() => {
-    // If in Telegram, let Telegram control the theme
-    if (!isTelegram) {
-      document.documentElement.setAttribute("data-theme", theme);
-      localStorage.setItem("theme", theme);
-    }
-  }, [theme, isTelegram]);
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("theme", theme);
+  }, [theme]);
 
   // ===== VIEW =====
   // На мобильных — стартуем с listWeek, на десктопе — сохраняем предыдущее (или month)
@@ -72,7 +76,6 @@ function App() {
   const [events, setEvents] = useState([]);
   const [hideDone, setHideDone] = useState(false);
   const [error, setError] = useState("");
-  const [telegramLoginAttempted, setTelegramLoginAttempted] = useState(false);
 
   // Profile panel
   const [profileOpen, setProfileOpen] = useState(false);
@@ -109,6 +112,7 @@ function App() {
     };
   }, [showForm, actionModalOpen, profileOpen]);
 
+<<<<<<< HEAD
   // Telegram auto-login - only attempt if we're actually in Telegram with valid initData
   useEffect(() => {
     // Only attempt Telegram login if:
@@ -148,6 +152,8 @@ function App() {
     }
   }, [isTelegram, token, telegramLoginAttempted, API_URL]);
 
+=======
+>>>>>>> c01622961fe5d5c6e75acd11a66950f1da623435
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -459,6 +465,7 @@ function App() {
         </div>
 
         <div className="panel">
+<<<<<<< HEAD
           {isTelegram ? (
             <>
               <h2>Telegram Mini App</h2>
@@ -545,6 +552,40 @@ function App() {
               </div>
             </>
           )}
+=======
+          <h2>Вход / Регистрация</h2>
+          {error && <div className="alert">{error}</div>}
+          <input
+            className={`input ${authErrors.username ? 'error' : ''}`}
+            type="text"
+            placeholder="Username"
+            value={auth.username}
+            onChange={(e) => {
+              setAuth({ ...auth, username: e.target.value });
+              if (authErrors.username) {
+                setAuthErrors({ ...authErrors, username: "" });
+              }
+            }}
+          />
+          {authErrors.username && <div className="field-error">{authErrors.username}</div>}
+          <input
+            className={`input ${authErrors.password ? 'error' : ''}`}
+            type="password"
+            placeholder="Password"
+            value={auth.password}
+            onChange={(e) => {
+              setAuth({ ...auth, password: e.target.value });
+              if (authErrors.password) {
+                setAuthErrors({ ...authErrors, password: "" });
+              }
+            }}
+          />
+          {authErrors.password && <div className="field-error">{authErrors.password}</div>}
+          <div className="row-buttons">
+            <button className="btn primary" onClick={handleLogin}>Войти</button>
+            <button className="btn ghost" onClick={handleRegister}>Регистрация</button>
+          </div>
+>>>>>>> c01622961fe5d5c6e75acd11a66950f1da623435
         </div>
       </div>
     );
@@ -592,16 +633,15 @@ function App() {
         theme={theme}
         setTheme={(t) => {
           setTheme(t);
-          if (!isTelegram) {
-            document.documentElement.setAttribute("data-theme", t);
-            localStorage.setItem("theme", t);
-          }
+          document.documentElement.setAttribute("data-theme", t);
+          localStorage.setItem("theme", t);
         }}
         hideDone={hideDone}
         setHideDone={setHideDone}
-        isTelegram={isTelegram}
+        isTelegram={false}
       />
 
+<<<<<<< HEAD
       {/* Tab Bar */}
       <div className="tab-bar">
         <button
@@ -624,6 +664,16 @@ function App() {
         >
           AI Ассистент
         </button>
+=======
+      {/* AI Assistant Chat */}
+      <div className="card">
+        <h3 style={{ margin: "0 0 16px 0", fontSize: "18px" }}>AI Ассистент</h3>
+        <AgentChat
+          whisperUrl={WHISPER_URL}
+          agentUrl={AGENT_URL}
+          token={token}
+        />
+>>>>>>> c01622961fe5d5c6e75acd11a66950f1da623435
       </div>
 
       {/* Tab Content */}
