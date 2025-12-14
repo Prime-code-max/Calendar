@@ -14,8 +14,6 @@ export default function ProfilePanel({
 }) {
   const [loading, setLoading] = useState(true);
   const [tz, setTz] = useState("Europe/Amsterdam");
-  const [linkCode, setLinkCode] = useState("");
-  const [linkExpires, setLinkExpires] = useState("");
   const [err, setErr] = useState("");
   const fileRef = useRef(null);
   const [pw, setPw] = useState({ old_password: "", new_password: "" });
@@ -126,37 +124,6 @@ export default function ProfilePanel({
     }
   };
 
-  const genTelegramCode = async () => {
-    try {
-      const res = await fetch(`${apiUrl}/telegram/link`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("Не удалось сгенерировать код");
-      const data = await res.json();
-      setLinkCode(data.link_code);
-      setLinkExpires(data.expires_at);
-      setErr("");
-    } catch (e) {
-      setErr(String(e.message || e));
-    }
-  };
-
-  const unlinkTelegram = async () => {
-    try {
-      const res = await fetch(`${apiUrl}/telegram/unlink`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("Не удалось отвязать Telegram");
-      setLinkCode("");
-      setLinkExpires("");
-      alert("Telegram отвязан");
-    } catch (e) {
-      setErr(String(e.message || e));
-    }
-  };
-
   if (!open) return null;
 
   return (
@@ -186,9 +153,8 @@ export default function ProfilePanel({
                       type="checkbox"
                       checked={theme === "dark"}
                       onChange={() => setTheme(theme === "dark" ? "light" : "dark")}
-                      disabled={isTelegram}
                     />
-                    <span>Тёмная тема{isTelegram ? " (управляется Telegram)" : ""}</span>
+                    <span>Тёмная тема</span>
                   </label>
 
                   <label className="switch">
@@ -254,22 +220,6 @@ export default function ProfilePanel({
                 </div>
               </section>
 
-              <section className="panel">
-                <h4>Привязка Telegram</h4>
-                <div className="row-buttons">
-                  <button className="btn" onClick={genTelegramCode}>Сгенерировать код привязки</button>
-                  <button className="btn danger" onClick={unlinkTelegram}>Отвязать Telegram</button>
-                </div>
-                {linkCode && (
-                  <div className="info-box">
-                    <div>Код: <b>{linkCode}</b></div>
-                    <div className="muted">Действует до: {new Date(linkExpires).toLocaleString()}</div>
-                    <div className="muted" style={{ marginTop: 6 }}>
-                      Позже бот примет команду <code>/start {linkCode}</code> и привяжет аккаунт.
-                    </div>
-                  </div>
-                )}
-              </section>
             </>
           )}
         </div>
