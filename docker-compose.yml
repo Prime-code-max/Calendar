@@ -64,6 +64,23 @@ services:
     build: ./calendar-frontend
     restart: unless-stopped
 
+  admin-service:
+    build: ./admin-service
+    env_file:
+      - ./.env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      SECRET_KEY: ${SECRET_KEY}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  admin-frontend:
+    build: ./admin-frontend
+    restart: unless-stopped
+
   gateway:
     image: nginx:1.27-alpine
     volumes:
@@ -72,7 +89,9 @@ services:
       - "8080:80"       # снаружи 8080 → внутри 80
     depends_on:
       - frontend
+      - admin-frontend
       - auth-service
+      - admin-service
       - whisper-service
       - agent-service
     restart: unless-stopped

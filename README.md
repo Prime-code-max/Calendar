@@ -1,6 +1,6 @@
 # Calendar Stack - Runbook (Docker Compose)
 
-This project uses Docker Compose to run: Postgres, Auth FastAPI, Whisper, Telegram Bot, Frontend (nginx), and Gateway (nginx).
+This project uses Docker Compose to run: Postgres, Auth FastAPI, Admin Service, Whisper, Telegram Bot, Frontend (nginx), Admin Frontend (nginx), and Gateway (nginx).
 
 ## Prerequisites
 - Docker Desktop 4.x
@@ -55,6 +55,24 @@ docker compose exec telegram-bot sh -c 'env | grep -E "BOT_TOKEN|SITE_URL|BACKEN
 - On the website, generate a link code (Profile → Telegram). In Telegram, use:
   - `/link <CODE>` to bind, the bot will call `http://auth-service:8000/telegram/confirm` internally.
   - `/unlink` to unbind.
+
+## Admin Panel
+
+Административная панель доступна по адресу: `http://localhost:8080/admin`
+
+### Доступ к админке
+
+1. Создайте пользователя с именем, указанным в `ADMIN_USERNAME` (по умолчанию: `admin`)
+2. Войдите в админку с этими учетными данными
+3. Используйте панель для:
+   - Просмотра статистики системы
+   - Управления пользователями
+   - Управления событиями
+
+### API Endpoints
+
+- Admin API: `http://localhost:8080/admin-api/`
+- Admin Frontend: `http://localhost:8080/admin`
 
 ## Troubleshooting
 - Container restarting with `BOT_TOKEN not set` or `SITE_URL not set or invalid`:
